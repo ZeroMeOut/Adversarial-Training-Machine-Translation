@@ -29,5 +29,5 @@ from googletrans import Translator
 #     j = j + 100
 #     sleep(60)
 
-
+# It would be best to use another method to find the wrong context but eh, it works
 
