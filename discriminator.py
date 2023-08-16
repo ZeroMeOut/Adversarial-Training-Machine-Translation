@@ -1,8 +1,8 @@
 import numpy as np
 import evaluate
+import torch
 from typing import Dict, Any
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, DataCollatorWithPadding,TrainingArguments, Trainer
-from datasets import Dataset
 
 ## Assuming the dataset is a json in the format [{first_lang:" ", second_lang:" ", context:" "}, {first_lang:" ", second_lang:" ", context:" "},...]
 class Discriminator():
@@ -92,6 +92,15 @@ class Discriminator():
       )
 
       trainer.train()
+    
+    ## Prediction
+    def predict(self, text1, text2):
+        inputs = self._tokenizer(text1, text2, padding="max_length", truncation=True, return_tensors="pt")
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+            logits = outputs.logits
+            predictions = torch.argmax(logits, dim=1)
+        return predictions
    
     
 
