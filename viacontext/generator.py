@@ -64,7 +64,7 @@ class Generator():
         self.dataset = dataset
         self.discriminator = discriminator
 
-        self.data_collator = DataCollatorWithPadding(tokenizer=self._tokenizer)
+        self.data_collator = DataCollatorForSeq2Seq(tokenizer=self._tokenizer, model=self.user_model)
 
 
         # Args blablabla
@@ -84,13 +84,13 @@ class Generator():
     ## Function for preprocessing
     def _model_inputs(self):
 
-        source_lang = self.lang 
-        target_lang = self.target 
+        source_lang = self.lang
+        target_lang = self.target
 
         def preprocess_function(examples):
           inputs = [example[source_lang] for example in examples['translation']]
           targets = [example[target_lang] for example in examples['translation']]
-          model_inputs = self._tokenizer(inputs, text_target=targets, max_length=128, truncation=True)
+          model_inputs = self._tokenizer(inputs, text_target=targets, max_length=128, truncation=True, padding=True, return_tensors="pt")
           return model_inputs
 
         len_of_dataset = len(self.dataset)
@@ -113,8 +113,12 @@ class Generator():
         train_dataset = DatasetDict({"train": Dataset.from_dict(train_dataset)})
         eval_dataset = DatasetDict({"eval": Dataset.from_dict(eval_dataset)})
 
+
         token_train = train_dataset.map(preprocess_function, batched=True)
         token_eval = eval_dataset.map(preprocess_function, batched=True)
+
+        token_train = token_train.remove_columns(train_dataset["train"].column_names)
+        token_eval = token_eval.remove_columns(eval_dataset["eval"].column_names)
 
         return token_train, token_eval
 
@@ -122,68 +126,49 @@ class Generator():
     # Training
     def train(self):
 
-      def compute_metrics(eval_preds):
-        metric = evaluate.load("sacrebleu")
-        preds, labels = eval_preds
-        if isinstance(preds, tuple):
-            preds = preds[0]
-        decoded_preds = self._tokenizer.batch_decode(preds, skip_special_tokens=True)
+      def postprocess_text(preds, labels):
+        preds = [pred.strip() for pred in preds]
+        labels = [[label.strip()] for label in labels]
 
-        labels = np.where(labels != -100, labels, self._tokenizer.pad_token_id)
-        decoded_labels = self._tokenizer.batch_decode(labels, skip_special_tokens=True)
+        return preds, labels
 
-        decoded_preds, decoded_labels = postprocess_text(decoded_preds, decoded_labels)
-
-        result = metric.compute(predictions=decoded_preds, references=decoded_labels)
-        result = {"bleu": result["score"]}
-
-        prediction_lens = [np.count_nonzero(pred != self._tokenizer.pad_token_id) for pred in preds]
-        result["gen_len"] = np.mean(prediction_lens)
-        result = {k: round(v, 4) for k, v in result.items()}
-        return result
-        
-      # Prepare the training arguments
       training_args = Seq2SeqTrainingArguments(
-      output_dir = self.output_dir,
-      learning_rate = self.learning_rate,
-      per_device_train_batch_size = self.per_device_train_batch_size,
-      per_device_eval_batch_size = self.per_device_eval_batch_size,
-      num_train_epochs = self.num_train_epochs,
-      weight_decay = self.weight_decay,
-      evaluation_strategy = self.evaluation_strategy,
-      save_strategy = self.save_strategy,
-      load_best_model_at_end = True,
+          output_dir = self.output_dir,
+          evaluation_strategy = self.evaluation_strategy,
+          save_strategy = self.save_strategy,
+          learning_rate = self.learning_rate,
+          per_device_train_batch_size= self.per_device_train_batch_size,
+          per_device_eval_batch_size= self.per_device_eval_batch_size,
+          weight_decay = self.weight_decay,
+          save_total_limit = 3,
+          num_train_epochs = self.num_train_epochs,
+          predict_with_generate=True,
+          load_best_model_at_end = True,
+          fp16=True,
       )
 
       token_train, token_eval = self._model_inputs()
 
       # Create a Trainer and train the model
-      # trainer = CustomTrainerWithDiscriminator(
-      #     discriminator=self.discriminator,
-      #     tokenizer=self._tokenizer,
-      #     model=self.user_model,
-      #     args=training_args,
-      #     train_dataset=token_train['train'],
-      #     eval_dataset=token_eval['eval'],
-      #     data_collator=self.data_collator,
-      #  )
-
-      trainer = Seq2SeqTrainer(
+      trainer = CustomTrainerWithDiscriminator(
+          discriminator=self.discriminator,
+          tokenizer=self._tokenizer,
           model=self.user_model,
           args=training_args,
           train_dataset=token_train['train'],
           eval_dataset=token_eval['eval'],
-          tokenizer=self._tokenizer,
           data_collator=self.data_collator,
-          compute_metrics=compute_metrics,
-      )
+       )
 
       trainer.train()
 
     ## Prediction
     def predict(self, text):
         inputs = self._tokenizer(text, padding="max_length", truncation=True, return_tensors="pt")
-        with torch.no_grad():
-            generated_ids = self.user_model.generate(**inputs, max_length=50, num_return_sequences=1)
-            generated_text = self._tokenizer.decode(generated_ids[0], skip_special_tokens=True)
+        inputs = {k: v.to(self.user_model.device) for k, v in inputs.items()}  # Move inputs to the same device as the model
+        
+
+        generated_ids = self.user_model.generate(**inputs, max_length=50, num_return_sequences=1)
+        generated_text = self._tokenizer.decode(generated_ids[0], skip_special_tokens=True)
         return generated_text
+
