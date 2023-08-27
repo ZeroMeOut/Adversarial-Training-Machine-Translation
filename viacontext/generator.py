@@ -3,7 +3,7 @@ import evaluate
 import torch
 from torch import nn
 from typing import Dict, Any
-from transformers import AutoModel, AutoModelForSeq2SeqLM, AutoTokenizer, DataCollatorWithPadding, Seq2SeqTrainingArguments, Seq2SeqTrainer
+from transformers import AutoModel, AutoModelForSeq2SeqLM, AutoTokenizer, Seq2SeqTrainingArguments, Seq2SeqTrainer, DataCollatorForSeq2Seq
 from datasets import DatasetDict, Dataset
 
 
@@ -21,6 +21,7 @@ class CustomTrainerWithDiscriminator(Seq2SeqTrainer):
 
 
     def compute_metrics(self, inputs, eval_preds):
+        metric = evaluate.load("sacrebleu")
         preds, labels = eval_preds
         if isinstance(preds, tuple):
             preds = preds[0]
@@ -41,24 +42,32 @@ class CustomTrainerWithDiscriminator(Seq2SeqTrainer):
         loss_fct = torch.nn.CrossEntropyLoss()
         loss = loss_fct(logits.view(-1, logits.shape[-1]), labels.view(-1))
 
-        return loss
+        # Compute BLEU score
+        result = metric.compute(predictions=decoded_preds, references=decoded_labels)
+        result = {"bleu": result["score"]}
+
+        prediction_lens = [np.count_nonzero(pred !=  self.tokenizer.pad_token_id) for pred in preds]
+        result["gen_len"] = np.mean(prediction_lens)
+        result = {k: round(v, 4) for k, v in result.items()}
+
+        return loss, result
 
 
 
-## Assuming the dataset is a json in the format [{lang:" ", target:" "}, {lang:" ", target:" "},...]
+## Assuming the dataset is a json in the format [{lang:" ", target:" "}, {lang:" ", target:" "},...] in a DataDict
 ## Also assuming that the user_model is a vaild model for text generation
 class Generator():
-    def __init__(self, user_model=None, _tokenizer=None, dataset=None, discriminator=None, lang='lang', target='target', output_dir="discriminator", learning_rate=2e-5,
+    def __init__(self, user_model=None, _tokenizer=None, dataset=None, discriminator=None, lang='lang', target='target', output_dir="generator", learning_rate=2e-5,
                  per_device_train_batch_size=16, per_device_eval_batch_size=16, num_train_epochs=2, weight_decay=0.01,
                  evaluation_strategy="epoch", save_strategy="epoch", split=0.3,):
 
         # main stuff
         if user_model is None:
-            user_model = AutoModelForSeq2SeqLM.from_pretrained("t5-small")
+            user_model = AutoModelForSeq2SeqLM.from_pretrained("google/mt5-small")
         self.user_model = user_model
 
         if _tokenizer is None:
-            _tokenizer = AutoTokenizer.from_pretrained("t5-small")
+            _tokenizer = AutoTokenizer.from_pretrained("google/mt5-small")
         self._tokenizer = _tokenizer
 
         self.dataset = dataset
@@ -93,44 +102,16 @@ class Generator():
           model_inputs = self._tokenizer(inputs, text_target=targets, max_length=128, truncation=True, padding=True, return_tensors="pt")
           return model_inputs
 
-        len_of_dataset = len(self.dataset)
-        ratio = int(len_of_dataset * self.split)
-        temp_train = self.dataset[0:ratio]
-        temp_eval = self.dataset[ratio:len_of_dataset]
+        token_dataset = self.dataset.map(preprocess_function, batched=True)
 
-        train_id = [str(index) for index, value in enumerate(temp_train)]
-        eval_id = [str(index) for index, value in enumerate(temp_eval)]
-
-        train_dataset = {
-                          'id':train_id,
-                          'translation':temp_train
-                      }
-        eval_dataset = {
-                  'id':eval_id,
-                  'translation':temp_eval
-              }
-
-        train_dataset = DatasetDict({"train": Dataset.from_dict(train_dataset)})
-        eval_dataset = DatasetDict({"eval": Dataset.from_dict(eval_dataset)})
-
-
-        token_train = train_dataset.map(preprocess_function, batched=True)
-        token_eval = eval_dataset.map(preprocess_function, batched=True)
-
-        token_train = token_train.remove_columns(train_dataset["train"].column_names)
-        token_eval = token_eval.remove_columns(eval_dataset["eval"].column_names)
+        token_train = token_dataset['train']
+        token_eval = token_dataset['test']
 
         return token_train, token_eval
 
 
     # Training
     def train(self):
-
-      def postprocess_text(preds, labels):
-        preds = [pred.strip() for pred in preds]
-        labels = [[label.strip()] for label in labels]
-
-        return preds, labels
 
       training_args = Seq2SeqTrainingArguments(
           output_dir = self.output_dir,
@@ -144,7 +125,6 @@ class Generator():
           num_train_epochs = self.num_train_epochs,
           predict_with_generate=True,
           load_best_model_at_end = True,
-          fp16=True,
       )
 
       token_train, token_eval = self._model_inputs()
@@ -166,9 +146,8 @@ class Generator():
     def predict(self, text):
         inputs = self._tokenizer(text, padding="max_length", truncation=True, return_tensors="pt")
         inputs = {k: v.to(self.user_model.device) for k, v in inputs.items()}  # Move inputs to the same device as the model
-        
+
 
         generated_ids = self.user_model.generate(**inputs, max_length=50, num_return_sequences=1)
         generated_text = self._tokenizer.decode(generated_ids[0], skip_special_tokens=True)
         return generated_text
-
