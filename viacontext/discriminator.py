@@ -4,19 +4,18 @@ import torch
 from typing import Dict, Any
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, DataCollatorWithPadding,TrainingArguments, Trainer
 
-## Assuming the dataset is a json in the format [{first_lang:" ", second_lang:" ", context:int 1 or 0}, {first_lang:" ", second_lang:" ", context:int 1 or 0},...]
+## Assuming the dataset is a json in the format [{first_lang:" ", second_lang:" ", context:" "}, {first_lang:" ", second_lang:" ", context:" "},...] in a DataDict
 ## Also assuming that the user_model is a vaild model for classification
 class Discriminator():
-    def __init__(self, user_model: str, dataset: Dict[str, Any], output_dir="discriminator", learning_rate=2e-5,
+    def __init__(self, user_model: str, dataset=None, output_dir="discriminator", first_lang='first_lang', second_lang='second_lang', target='target', learning_rate=2e-5,
                  per_device_train_batch_size=16, per_device_eval_batch_size=16, num_train_epochs=2, weight_decay=0.01,
-                 evaluation_strategy="epoch", save_strategy="epoch", split=0.3,):
-      
+                 evaluation_strategy="epoch", save_strategy="epoch",):
+
         # main stuff
         self.dataset = dataset
         self._tokenizer = AutoTokenizer.from_pretrained(user_model, truncation=True)
         self.model = AutoModelForSequenceClassification.from_pretrained(user_model, num_labels=2)
         self.data_collator = DataCollatorWithPadding(tokenizer=self._tokenizer)
-        self.encoded_data_with_labels = self._encode_data_with_labels()
 
         # Args blablabla
         self.output_dir = output_dir
@@ -27,34 +26,35 @@ class Discriminator():
         self.weight_decay = weight_decay
         self.evaluation_strategy = evaluation_strategy
         self.save_strategy = save_strategy
-        self.split = split
+        self.first_lang = first_lang
+        self.second_lang = second_lang
+        self.target = target
+
 
 
     ## Encode the dataset let's goooo
-    def _encode_data_with_labels(self):
-        encoded_data_with_labels = []
-        for item in self.dataset:
-            first_lang = list(item.values())[0]
-            second_lang = list(item.values())[1]
-            context = list(item.values())[2]
+    def _model_inputs(self):
 
-            encoded = self._tokenizer(
-                first_lang,
-                second_lang,
-                padding="max_length",
-                truncation=True
-            )
+        lang1 = self.first_lang
+        lang2 = self.second_lang
+        target = self.target
 
-            data_dict = {
-                'input_ids': encoded['input_ids'],
-                'attention_mask': encoded['attention_mask'],
-                'labels': context
-            }
-            encoded_data_with_labels.append(data_dict)
+        def preprocess_function(examples):
+          inputs = [example[lang1] + ' ' + example[lang2] for example in examples['translation']]
+          labels = [int(example[target]) for example in examples['translation']]
 
-        return encoded_data_with_labels
+          model_inputs = self._tokenizer(inputs, padding="max_length", truncation=True)
+          model_inputs['labels'] = labels
+          model_inputs['text'] = inputs
+          return model_inputs
 
-    ## Training 
+        token_dataset = self.dataset.map(preprocess_function, batched=True)
+
+        token_train = token_dataset['train']
+        token_eval = token_dataset['test']
+
+        return token_train, token_eval
+
     def train(self):
 
       accuracy = evaluate.load("accuracy")
@@ -62,7 +62,7 @@ class Discriminator():
         predictions, labels = eval_pred
         predictions = np.argmax(predictions, axis=1)
         return accuracy.compute(predictions=predictions, references=labels)
-              
+
 
       # Prepare the training arguments
       training_args = TrainingArguments(
@@ -78,24 +78,21 @@ class Discriminator():
       )
 
       # Create eval and train datasets from the encoded data with labels
-      len_of_encoded = len(self.encoded_data_with_labels)
-      ratio = int(len_of_encoded * self.split)
-      train_dataset = self.encoded_data_with_labels[0:ratio]
-      eval_dataset = self.encoded_data_with_labels[ratio:len_of_encoded]
+      token_train, token_eval = self._model_inputs()
 
       # Create a Trainer and train the model
       trainer = Trainer(
           model=self.model,
           args=training_args,
-          train_dataset=train_dataset,
-          eval_dataset=eval_dataset,
+          train_dataset=token_train,
+          eval_dataset=token_eval,
           data_collator=self.data_collator,
           compute_metrics=compute_metrics,
       )
 
       trainer.train()
-    
-    ## Prediction, retuns a tensor
+
+    ## Prediction
     def predict(self, text1, text2):
         inputs = self._tokenizer(text1, text2, padding="max_length", truncation=True, return_tensors="pt")
         with torch.no_grad():

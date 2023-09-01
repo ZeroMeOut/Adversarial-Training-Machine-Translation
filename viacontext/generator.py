@@ -7,50 +7,58 @@ from transformers import AutoModel, AutoModelForSeq2SeqLM, AutoTokenizer, Seq2Se
 from datasets import DatasetDict, Dataset
 
 
-def postprocess_text(preds, labels):
-    preds = [pred.strip() for pred in preds]
+def postprocess_text(predictions, labels):
+    """
+    Postprocesses the generated predictions and labels.
+    """
+    predictions = [pred.strip() for pred in predictions]
     labels = [[label.strip()] for label in labels]
+    return predictions, labels
 
-    return preds, labels
-
-class CustomTrainerWithDiscriminator(Seq2SeqTrainer):
-    def __init__(self, discriminator, tokenizer, model, args, train_dataset=None, eval_dataset=None, data_collator=None, compute_metrics=None):
-        super().__init__(model=model, args=args, train_dataset=train_dataset, eval_dataset=eval_dataset, data_collator=data_collator, compute_metrics=compute_metrics)
+class CustomSeq2SeqTrainer(Seq2SeqTrainer):
+    def __init__(self, discriminator, tokenizer, model, args, train_dataset=None, eval_dataset=None, data_collator=None):
+        """
+        Custom trainer for sequence-to-sequence tasks with a discriminator.
+        """
+        super().__init__(model=model, args=args, train_dataset=train_dataset, eval_dataset=eval_dataset, data_collator=data_collator)
         self.discriminator = discriminator
         self.tokenizer = tokenizer
 
-
-    def compute_metrics(self, inputs, eval_preds):
+    def compute_metrics(self, inputs, eval_predictions):
+        """
+        Computes evaluation metrics including BLEU and discriminator-based loss.
+        """
         metric = evaluate.load("sacrebleu")
-        preds, labels = eval_preds
-        if isinstance(preds, tuple):
-            preds = preds[0]
-        decoded_preds = self.tokenizer.batch_decode(preds, skip_special_tokens=True)
+        generated_predictions, labels = eval_predictions
 
+        if isinstance(generated_predictions, tuple):
+            generated_predictions = generated_predictions[0]
+
+        decoded_generated_preds = self.tokenizer.batch_decode(generated_predictions, skip_special_tokens=True)
         labels = np.where(labels != -100, labels, self.tokenizer.pad_token_id)
         decoded_labels = self.tokenizer.batch_decode(labels, skip_special_tokens=True)
 
-        decoded_preds, decoded_labels = postprocess_text(decoded_preds, decoded_labels)
+        decoded_generated_preds, decoded_labels = postprocess_text(decoded_generated_preds, decoded_labels)
 
-        discriminator_predictions = self.discriminator.predict(decoded_labels, decoded_preds)
+        discriminator_predictions = self.discriminator.predict(decoded_labels, decoded_generated_preds)
         labels = torch.tensor(discriminator_predictions, dtype=torch.long, device=self.model.device)
 
-        outputs = self.model(**inputs)
-        logits = outputs.logits
+        model_outputs = self.model(**inputs)
+        logits = model_outputs.logits
 
         # Compute cross-entropy loss
         loss_fct = torch.nn.CrossEntropyLoss()
         loss = loss_fct(logits.view(-1, logits.shape[-1]), labels.view(-1))
 
         # Compute BLEU score
-        result = metric.compute(predictions=decoded_preds, references=decoded_labels)
-        result = {"bleu": result["score"]}
+        bleu_result = metric.compute(predictions=decoded_generated_preds, references=decoded_labels)
+        bleu_result = {"bleu": bleu_result["score"]}
 
-        prediction_lens = [np.count_nonzero(pred !=  self.tokenizer.pad_token_id) for pred in preds]
-        result["gen_len"] = np.mean(prediction_lens)
-        result = {k: round(v, 4) for k, v in result.items()}
+        prediction_lens = [np.count_nonzero(pred != self.tokenizer.pad_token_id) for pred in generated_predictions]
+        bleu_result["gen_len"] = np.mean(prediction_lens)
+        bleu_result = {k: round(v, 4) for k, v in bleu_result.items()}
 
-        return loss, result
+        return loss, bleu_result
 
 
 
@@ -130,13 +138,13 @@ class Generator():
       token_train, token_eval = self._model_inputs()
 
       # Create a Trainer and train the model
-      trainer = CustomTrainerWithDiscriminator(
+      trainer = CustomSeq2SeqTrainer(
           discriminator=self.discriminator,
           tokenizer=self._tokenizer,
           model=self.user_model,
           args=training_args,
-          train_dataset=token_train['train'],
-          eval_dataset=token_eval['eval'],
+          train_dataset=token_train,
+          eval_dataset=token_eval,
           data_collator=self.data_collator,
        )
 
