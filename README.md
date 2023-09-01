@@ -32,7 +32,7 @@ user_model_name = "bert-base-uncased"
 discriminator = Discriminator(user_model_name, context_dataset, first_lang='en', second_lang='zh', target='context')
 discriminator.train()
 ```
-The  first_lang, second_lang and target should be changed according to the context dataset. The models accepted can be seen [here][https://huggingface.co/docs/transformers/v4.31.0/en/tasks/sequence_classification#text-classification].
+The  first_lang, second_lang and target should be changed according to the context dataset. The models accepted can be seen [here](https://huggingface.co/docs/transformers/v4.31.0/en/tasks/sequence_classification#text-classification).
 
 
 
