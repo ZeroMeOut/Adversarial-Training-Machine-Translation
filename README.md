@@ -1,4 +1,5 @@
 # Adversarial-Training-Machine-Translation
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 The aim of this project is to enhance the accuracy of translation models by considering contextual correctness. Many translation models often struggle with producing translations that are contextually accurate. For instance, Google Translate may translate "I speak Chinese" to "我说中文," which is incorrect.
 
 My solution involves training a discriminator to determine the correctness of the context between two languages. Each data sample consists of pairs like {"en": "I speak Chinese", "zh": "我说中文", "context": 0}, where the 'context' flag indicates whether the translation context is incorrect (0) or correct (1).
@@ -64,6 +65,11 @@ If you would like to contribute to this project, I welcome contributions from th
 7. Submit a pull request to the main repository.
    
 Please ensure that your code adheres to any coding standards and guidelines set by the project.
+
+## License
+
+This project is licensed under the [Apache License 2.0](LICENSE) - see the [LICENSE](LICENSE) file for details.
+
 
 
 
