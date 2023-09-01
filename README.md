@@ -23,7 +23,7 @@ pip install transformers==4.28.0 datasets evaluate torch sentencepiece tokenizer
 ```
 
 ## Usage
-Use ```main.py``` as reference. Alternitively, ```generate_discriminate.ipynb``` can be used. Please note that format of the dataset should be in a DatasetDict format, with train and test Dataset.from_dict respectively.
+Use  ```generate_discriminate.ipynb``` as reference. Please note that format of the dataset should be in a DatasetDict format, with train and test Dataset.from_dict respectively.
 
 ## Training the Discriminator
 To train the discriminator, you can use the following code:
@@ -39,12 +39,30 @@ To train the generator, you can use the following code:
 ```python
 from transformers import BartForConditionalGeneration, BartTokenizer
 
+discriminator_dir = '/content/discriminator/checkpoint-2000'
 user_model = BartForConditionalGeneration.from_pretrained("facebook/bart-base", forced_bos_token_id=0)
 _tokenizer = BartTokenizer.from_pretrained("facebook/bart-base")
-generator = Generator(dataset=translate_dataset, user_model=user_model, _tokenizer=_tokenizer, discriminator=discriminator, lang='en', target='zh', num_train_epochs=5,  output_dir="generator-mbart")
+
+generator = Generator(dataset=opus_smol_dataset, user_model=user_model, _tokenizer=_tokenizer, discriminator=discriminator, discriminator_dir=discriminator_dir, lang='en', target='zh', num_train_epochs=2,  output_dir="generator")
 ```
+The lang and target should be changed according to the lang dataset, and discriminator_dir to the appropriate dir. The models accepted can be seen [here](https://huggingface.co/docs/transformers/tasks/translation)
 
+## Making Predictions
+To make predictions using the trained generator, you can use the following code:
+```python
+generator.predict("I just got in my head a little bit.", "/content/generator/checkpoint-1000")
+```
+## Contributing
+If you would like to contribute to this project, we welcome contributions from the community. Here's how you can get involved:
 
+1. Fork the repository on GitHub.
+2. Clone your fork locally.
+3. Create a new branch for your contributions.
+4. Make changes, improvements, or bug fixes.
+5. Test your changes thoroughly.
+6. Commit your changes and push them to your fork on GitHub.
+7. Submit a pull request to the main repository.
+Please ensure that your code adheres to any coding standards and guidelines set by the project.
 
 
 
