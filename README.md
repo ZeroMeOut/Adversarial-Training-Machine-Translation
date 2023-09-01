@@ -32,7 +32,18 @@ user_model_name = "bert-base-uncased"
 discriminator = Discriminator(user_model_name, context_dataset, first_lang='en', second_lang='zh', target='context')
 discriminator.train()
 ```
-The  first_lang, second_lang and target should be changed according to the context dataset. The models accepted can be seen [here](https://huggingface.co/docs/transformers/v4.31.0/en/tasks/sequence_classification#text-classification).
+The first_lang, second_lang and target should be changed according to the context dataset. The models accepted can be seen [here](https://huggingface.co/docs/transformers/v4.31.0/en/tasks/sequence_classification#text-classification).
+
+## Training the Generator
+To train the generator, you can use the following code:
+```python
+from transformers import BartForConditionalGeneration, BartTokenizer
+
+user_model = BartForConditionalGeneration.from_pretrained("facebook/bart-base", forced_bos_token_id=0)
+_tokenizer = BartTokenizer.from_pretrained("facebook/bart-base")
+generator = Generator(dataset=translate_dataset, user_model=user_model, _tokenizer=_tokenizer, discriminator=discriminator, lang='en', target='zh', num_train_epochs=5,  output_dir="generator-mbart")
+```
+
 
 
 
