@@ -53,7 +53,7 @@ To make predictions using the trained generator, you can use the following code:
 generator.predict("I just got in my head a little bit.", "/content/generator/checkpoint-1000")
 ```
 ## Contributing
-If you would like to contribute to this project, we welcome contributions from the community. Here's how you can get involved:
+If you would like to contribute to this project, I welcome contributions from the community. Here's how you can get involved:
 
 1. Fork the repository on GitHub.
 2. Clone your fork locally.
