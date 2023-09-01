@@ -55,6 +55,7 @@ class Discriminator():
 
         return token_train, token_eval
 
+    #Training
     def train(self):
 
       accuracy = evaluate.load("accuracy")
@@ -93,13 +94,24 @@ class Discriminator():
       trainer.train()
 
     ## Prediction
-    def predict(self, text1, text2):
-        inputs = self._tokenizer(text1, text2, padding="max_length", truncation=True, return_tensors="pt")
+    def predict(self, text1, text2, trained_model_dir=None):
+        if trained_model_dir == None:
+          trained_model_dir = self.output_dir
+        # Initialize the tokenizer and model
+        tokenizer = self._tokenizer
+        model = AutoModelForSequenceClassification.from_pretrained(trained_model_dir)
+
+        # Tokenize the input text
+        inputs = tokenizer(text1, text2, padding="max_length", truncation=True, return_tensors="pt")
+
+        # Ensure the model is in evaluation mode
+        model.eval()
+
+        # Perform the prediction
         with torch.no_grad():
-            outputs = self.model(**inputs)
+            outputs = model(**inputs)
             logits = outputs.logits
             predictions = torch.argmax(logits, dim=1)
+
         return predictions
-   
-    
 

@@ -7,6 +7,7 @@ from transformers import AutoModel, AutoModelForSeq2SeqLM, AutoTokenizer, Seq2Se
 from datasets import DatasetDict, Dataset
 
 
+
 def postprocess_text(predictions, labels):
     """
     Postprocesses the generated predictions and labels.
@@ -16,13 +17,14 @@ def postprocess_text(predictions, labels):
     return predictions, labels
 
 class CustomSeq2SeqTrainer(Seq2SeqTrainer):
-    def __init__(self, discriminator, tokenizer, model, args, train_dataset=None, eval_dataset=None, data_collator=None):
+    def __init__(self, discriminator, discriminator_dir, tokenizer, model, args, train_dataset=None, eval_dataset=None, data_collator=None):
         """
         Custom trainer for sequence-to-sequence tasks with a discriminator.
         """
         super().__init__(model=model, args=args, train_dataset=train_dataset, eval_dataset=eval_dataset, data_collator=data_collator)
         self.discriminator = discriminator
         self.tokenizer = tokenizer
+        self.discriminator_dir = discriminator_dir
 
     def compute_metrics(self, inputs, eval_predictions):
         """
@@ -40,7 +42,7 @@ class CustomSeq2SeqTrainer(Seq2SeqTrainer):
 
         decoded_generated_preds, decoded_labels = postprocess_text(decoded_generated_preds, decoded_labels)
 
-        discriminator_predictions = self.discriminator.predict(decoded_labels, decoded_generated_preds)
+        discriminator_predictions = self.discriminator.predict(decoded_labels, decoded_generated_preds, self.discriminator_dir)
         labels = torch.tensor(discriminator_predictions, dtype=torch.long, device=self.model.device)
 
         model_outputs = self.model(**inputs)
@@ -61,11 +63,10 @@ class CustomSeq2SeqTrainer(Seq2SeqTrainer):
         return loss, bleu_result
 
 
-
 ## Assuming the dataset is a json in the format [{lang:" ", target:" "}, {lang:" ", target:" "},...] in a DataDict
 ## Also assuming that the user_model is a vaild model for text generation
 class Generator():
-    def __init__(self, user_model=None, _tokenizer=None, dataset=None, discriminator=None, lang='lang', target='target', output_dir="generator", learning_rate=2e-5,
+    def __init__(self, user_model=None, _tokenizer=None, dataset=None, discriminator=None, lang='lang', target='target', output_dir="generator", discriminator_dir=None, learning_rate=2e-5,
                  per_device_train_batch_size=16, per_device_eval_batch_size=16, num_train_epochs=2, weight_decay=0.01,
                  evaluation_strategy="epoch", save_strategy="epoch", split=0.3,):
 
@@ -80,6 +81,7 @@ class Generator():
 
         self.dataset = dataset
         self.discriminator = discriminator
+        self.discriminator_dir = discriminator_dir
 
         self.data_collator = DataCollatorForSeq2Seq(tokenizer=self._tokenizer, model=self.user_model)
 
@@ -140,6 +142,7 @@ class Generator():
       # Create a Trainer and train the model
       trainer = CustomSeq2SeqTrainer(
           discriminator=self.discriminator,
+          discriminator_dir=self.discriminator_dir,
           tokenizer=self._tokenizer,
           model=self.user_model,
           args=training_args,
@@ -151,11 +154,11 @@ class Generator():
       trainer.train()
 
     ## Prediction
-    def predict(self, text):
+    def predict(self, text, trained_generator_dir):
         inputs = self._tokenizer(text, padding="max_length", truncation=True, return_tensors="pt")
-        inputs = {k: v.to(self.user_model.device) for k, v in inputs.items()}  # Move inputs to the same device as the model
+        model = AutoModelForSeq2SeqLM.from_pretrained(trained_generator_dir)
 
 
-        generated_ids = self.user_model.generate(**inputs, max_length=50, num_return_sequences=1)
+        generated_ids = model.generate(**inputs, max_length=50, num_return_sequences=1)
         generated_text = self._tokenizer.decode(generated_ids[0], skip_special_tokens=True)
         return generated_text
